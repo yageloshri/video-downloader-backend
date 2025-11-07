@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const youtubedl = require('youtube-dl-exec');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,19 +13,23 @@ app.post('/api/video-info', async (req, res) => {
   try {
     const { url } = req.body;
     
-    const info = await youtubedl(url, {
-      dumpSingleJson: true,
-      noCheckCertificates: true,
-      noWarnings: true,
-      preferFreeFormats: true
-    });
+    // חלץ את ה-video ID מה-URL
+    const videoId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/)?.[1];
+    
+    if (!videoId) {
+      return res.status(400).json({ error: 'קישור לא תקין' });
+    }
+
+    // השתמש ב-YouTube oEmbed API לקבלת מידע בסיסי
+    const response = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+    const data = await response.json();
     
     res.json({
-      title: info.title,
-      thumbnail: info.thumbnail,
-      duration: info.duration,
+      title: data.title,
+      thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+      videoId: videoId,
       formats: {
-        audio: ['128kbps', '320kbps'],
+        audio: ['mp3'],
         video: ['360p', '720p', '1080p']
       }
     });
@@ -35,42 +39,38 @@ app.post('/api/video-info', async (req, res) => {
   }
 });
 
-// API להורדת הקובץ
+// API להפניה להורדה
 app.post('/api/download', async (req, res) => {
   try {
     const { url, format, quality } = req.body;
-
-    const options = {
-      noCheckCertificates: true,
-      noWarnings: true,
-      preferFreeFormats: true,
-      addHeader: ['referer:youtube.com', 'user-agent:googlebot']
-    };
-
-    if (format === 'mp3') {
-      options.extractAudio = true;
-      options.audioFormat = 'mp3';
-      options.audioQuality = 0;
-    } else {
-      const formatMap = {
-        '360p': '18',
-        '720p': '22', 
-        '1080p': '137+140'
-      };
-      options.format = formatMap[quality] || 'best';
+    
+    // חלץ video ID
+    const videoId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&]+)/)?.[1];
+    
+    if (!videoId) {
+      return res.status(400).json({ error: 'קישור לא תקין' });
     }
 
-    const output = await youtubedl(url, {
-      ...options,
-      output: '-'
-    });
+    // השתמש ב-API חיצוני חינמי
+    let downloadUrl;
+    
+    if (format === 'mp3') {
+      // הפנה ל-API להורדת MP3
+      downloadUrl = `https://api.vevioz.com/api/button/mp3/${videoId}`;
+    } else {
+      // הפנה ל-API להורדת MP4
+      downloadUrl = `https://api.vevioz.com/api/button/${quality}/${videoId}`;
+    }
 
-    res.header('Content-Type', format === 'mp3' ? 'audio/mpeg' : 'video/mp4');
-    res.send(output);
+    res.json({ 
+      success: true,
+      downloadUrl: downloadUrl,
+      message: 'הקישור להורדה מוכן'
+    });
     
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'שגיאה בהורדת הקובץ' });
+    res.status(500).json({ error: 'שגיאה ביצירת קישור הורדה' });
   }
 });
 
