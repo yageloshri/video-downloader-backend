@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const ytdl = require('@distube/ytdl-core');
+const youtubedl = require('youtube-dl-exec');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -13,16 +13,17 @@ app.post('/api/video-info', async (req, res) => {
   try {
     const { url } = req.body;
     
-    if (!ytdl.validateURL(url)) {
-      return res.status(400).json({ error: 'קישור לא תקין' });
-    }
-
-    const info = await ytdl.getInfo(url);
+    const info = await youtubedl(url, {
+      dumpSingleJson: true,
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true
+    });
     
     res.json({
-      title: info.videoDetails.title,
-      thumbnail: info.videoDetails.thumbnails[0].url,
-      duration: info.videoDetails.lengthSeconds,
+      title: info.title,
+      thumbnail: info.thumbnail,
+      duration: info.duration,
       formats: {
         audio: ['128kbps', '320kbps'],
         video: ['360p', '720p', '1080p']
@@ -39,35 +40,33 @@ app.post('/api/download', async (req, res) => {
   try {
     const { url, format, quality } = req.body;
 
-    if (!ytdl.validateURL(url)) {
-      return res.status(400).json({ error: 'קישור לא תקין' });
-    }
-
-    const info = await ytdl.getInfo(url);
-    const title = info.videoDetails.title.replace(/[^\w\s]/gi, '');
+    const options = {
+      noCheckCertificates: true,
+      noWarnings: true,
+      preferFreeFormats: true,
+      addHeader: ['referer:youtube.com', 'user-agent:googlebot']
+    };
 
     if (format === 'mp3') {
-      res.header('Content-Disposition', `attachment; filename="${title}.mp3"`);
-      
-      ytdl(url, {
-        quality: 'highestaudio',
-        filter: 'audioonly'
-      }).pipe(res);
-      
+      options.extractAudio = true;
+      options.audioFormat = 'mp3';
+      options.audioQuality = 0;
     } else {
-      const qualityMap = {
+      const formatMap = {
         '360p': '18',
-        '720p': '22',
-        '1080p': '137'
+        '720p': '22', 
+        '1080p': '137+140'
       };
-      
-      res.header('Content-Disposition', `attachment; filename="${title}.mp4"`);
-      
-      ytdl(url, {
-        quality: qualityMap[quality] || 'highest',
-        filter: format => format.container === 'mp4'
-      }).pipe(res);
+      options.format = formatMap[quality] || 'best';
     }
+
+    const output = await youtubedl(url, {
+      ...options,
+      output: '-'
+    });
+
+    res.header('Content-Type', format === 'mp3' ? 'audio/mpeg' : 'video/mp4');
+    res.send(output);
     
   } catch (error) {
     console.error(error);
@@ -78,4 +77,3 @@ app.post('/api/download', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
-
